@@ -27,163 +27,13 @@ Menu.Items = {}
 
 Menu.Banner = {
     enabled = true,
-    imageUrl = "https://i.hizliresim.com/t7rdy5t.png",
+    imageUrl = "https://hizliresim.com/t7rdy5t",
     height = 100
 }
 
 Menu.bannerTexture = nil
 Menu.bannerWidth = 0
 Menu.bannerHeight = 0
-Menu.bannerLoadFailed = false
-Menu.bannerLoading = false
-
-function Menu.IsImageBytes(data)
-    if not data or #data < 4 then return false end
-    local b1, b2, b3, b4 = string.byte(data, 1, 4)
-    if b1 == 0x89 and b2 == 0x50 and b3 == 0x4E and b4 == 0x47 then return true end
-    if b1 == 0xFF and b2 == 0xD8 and b3 == 0xFF then return true end
-    if b1 == 0x42 and b2 == 0x4D then return true end
-    if b1 == 0x47 and b2 == 0x49 and b3 == 0x46 then return true end
-    return false
-end
-
-function Menu.ExtractImageUrlFromHtml(html)
-    if not html or html == "" then return nil end
-    local patterns = {
-        'property=["\']og:image["\'][^>]-content=["\']([^"\']+)["\']',
-        'content=["\']([^"\']+)["\'][^>]-property=["\']og:image["\']',
-        '(https?://i%.hizliresim%.com/[%w%-%._]+)',
-        '(https?://i%.imgur%.com/[%w%-%._]+)',
-        '(https?://cdn%.discordapp%.com/attachments/[^"\']+)',
-        '(https?://media%.discordapp%.net/attachments/[^"\']+)',
-        '(https?://raw%.githubusercontent%.com/[^"\']+%.[pP][nN][gG])',
-        '(https?://raw%.githubusercontent%.com/[^"\']+%.[jJ][pP][eE]?[gG]?)',
-        'src=["\'](https?://[^"\']+%.[pP][nN][gG])["\']',
-        'src=["\'](https?://[^"\']+%.[jJ][pP][eE]?[gG]?)["\']',
-        'src=["\'](https?://[^"\']+%.[wW][eE][bB][pP])["\']'
-    }
-    for _, pattern in ipairs(patterns) do
-        local found = html:match(pattern)
-        if found and found ~= "" then return found end
-    end
-    return nil
-end
-
-function Menu.ResolveBannerCandidates(url)
-    local candidates = {}
-    local function add(u)
-        if u and u ~= "" then
-            for _, existing in ipairs(candidates) do
-                if existing == u then return end
-            end
-            table.insert(candidates, u)
-        end
-    end
-
-    add(url)
-
-    local lower = string.lower(url or "")
-    local hizId = url and url:match("hizliresim%.com/([%w%-_]+)")
-    if hizId then
-        hizId = hizId:gsub("%.png$", ""):gsub("%.jpg$", ""):gsub("%.jpeg$", "")
-        add("https://i.hizliresim.com/" .. hizId .. ".png")
-        add("https://i.hizliresim.com/" .. hizId .. ".jpg")
-    end
-
-    local imgurId = url and url:match("imgur%.com/([%w%d]+)")
-    if imgurId and not lower:find("i%.imgur%.com") then
-        add("https://i.imgur.com/" .. imgurId .. ".png")
-        add("https://i.imgur.com/" .. imgurId .. ".jpg")
-    end
-
-    if not lower:match("%.png") and not lower:match("%.jpe?g") and not lower:match("%.webp") and not lower:match("%.gif") and not lower:match("%.bmp") then
-        add(url .. ".png")
-        add(url .. ".jpg")
-    end
-
-    return candidates
-end
-
-function Menu.TryLoadBannerFromBytes(body)
-    if not body or #body == 0 then return false end
-    if not Menu.IsImageBytes(body) then return false end
-    if not Susano or not Susano.LoadTextureFromBuffer then return false end
-
-    local ok, textureId, width, height = pcall(function()
-        return Susano.LoadTextureFromBuffer(body)
-    end)
-
-    if ok and textureId and textureId ~= 0 then
-        Menu.bannerTexture = textureId
-        Menu.bannerWidth = width or 0
-        Menu.bannerHeight = height or 0
-        Menu.bannerLoadFailed = false
-        return true
-    end
-
-    return false
-end
-
-function Menu.LoadBannerTexture(url)
-    if not url or url == "" then return end
-    if Menu.bannerLoading then return end
-    if not Susano or not Susano.HttpGet then return end
-
-    Menu.bannerLoading = true
-    Menu.bannerLoadFailed = false
-
-    CreateThread(function()
-        local loaded = false
-        local candidates = Menu.ResolveBannerCandidates(url)
-
-        for _, candidate in ipairs(candidates) do
-            if loaded then break end
-
-            local ok, status, body = pcall(function()
-                return Susano.HttpGet(candidate)
-            end)
-
-            if ok and status == 200 and body and #body > 0 then
-                if Menu.TryLoadBannerFromBytes(body) then
-                    loaded = true
-                    break
-                end
-
-                local extracted = Menu.ExtractImageUrlFromHtml(body)
-                if extracted and extracted ~= candidate then
-                    local ok2, status2, body2 = pcall(function()
-                        return Susano.HttpGet(extracted)
-                    end)
-                    if ok2 and status2 == 200 and body2 and Menu.TryLoadBannerFromBytes(body2) then
-                        loaded = true
-                        break
-                    end
-                end
-            end
-        end
-
-        Menu.bannerLoading = false
-        Menu.bannerLoadFailed = not loaded
-    end)
-end
-
-function Menu.SetBannerUrl(url)
-    if not url or url == "" or url == "https://hizliresim.com/t7rdy5t" then return end
-    Menu.Banner.imageUrl = url
-    Menu.bannerTexture = nil
-    Menu.bannerWidth = 0
-    Menu.bannerHeight = 0
-    Menu.LoadBannerTexture(url)
-end
-
-function Menu.ColorToUnit(r, g, b, a)
-    a = a or 255
-    if r > 1 then r = r / 255 end
-    if g > 1 then g = g / 255 end
-    if b > 1 then b = b / 255 end
-    if a > 1 then a = a / 255 end
-    return r, g, b, a
-end
 
 Menu.Colors = {
     Accent = { r = 255, g = 255, b = 255 },
@@ -226,6 +76,34 @@ function Menu.GetScaledPosition()
         itemRadius = Menu.Position.itemRadius * scale,
         headerRadius = Menu.Position.headerRadius * scale
     }
+end
+
+function Menu.LoadBannerTexture(url)
+    if not url or url == "" then return end
+    if not Susano or not Susano.HttpGet or not Susano.LoadTextureFromBuffer then return end
+
+    CreateThread(function()
+        pcall(function()
+            local status, body = Susano.HttpGet(url)
+            if status == 200 and body and #body > 0 then
+                local textureId, width, height = Susano.LoadTextureFromBuffer(body)
+                if textureId and textureId ~= 0 then
+                    Menu.bannerTexture = textureId
+                    Menu.bannerWidth = width
+                    Menu.bannerHeight = height
+                end
+            end
+        end)
+    end)
+end
+
+function Menu.ColorToUnit(r, g, b, a)
+    a = a or 255
+    if r > 1 then r = r / 255 end
+    if g > 1 then g = g / 255 end
+    if b > 1 then b = b / 255 end
+    if a > 1 then a = a / 255 end
+    return r, g, b, a
 end
 
 function Menu.DrawRect(x, y, width, height, r, g, b, a, rounding)
@@ -592,15 +470,16 @@ function Menu.DrawHeader()
     local x, y = pos.x, pos.y
     local width = pos.width - 1
     local bannerHeight = Menu.Banner.enabled and (Menu.Banner.height * scale) or pos.headerHeight
-    local hasBannerImage = Menu.Banner.enabled and Menu.bannerTexture and Menu.bannerTexture > 0 and Susano and Susano.DrawImage
 
-    if hasBannerImage then
+    if Menu.Banner.enabled and Menu.bannerTexture and Menu.bannerTexture > 0 and Susano and Susano.DrawImage then
         Susano.DrawImage(Menu.bannerTexture, x, y, width, bannerHeight, 1, 1, 1, 1, pos.headerRadius)
+        Menu.DrawRect(x, y, width, bannerHeight, 0, 0, 0, 140, pos.headerRadius)
     else
         Menu.DrawRect(x, y, width, bannerHeight, 0, 0, 0, 255, pos.headerRadius)
-        local titleSize = 34 * scale
-        Menu.DrawBrandText(x + (width / 2), y + (bannerHeight / 2), titleSize, "")
     end
+
+    local titleSize = 34 * scale
+    Menu.DrawBrandText(x + (width / 2), y + (bannerHeight / 2), titleSize, "")
 end
 
 function Menu.DrawSectionBar()
@@ -1048,19 +927,8 @@ CreateThread(function()
     end
 end)
 
-if Menu.Banner.enabled and Menu.Banner.imageUrl and Menu.Banner.imageUrl ~= "" and Menu.Banner.imageUrl ~= "BANNER_URL_HERE" then
+if Menu.Banner.enabled and Menu.Banner.imageUrl and Menu.Banner.imageUrl ~= "" then
     Menu.LoadBannerTexture(Menu.Banner.imageUrl)
 end
-
-CreateThread(function()
-    while true do
-        Wait(5000)
-        if Menu.Banner.enabled and Menu.Banner.imageUrl and Menu.Banner.imageUrl ~= "" and Menu.Banner.imageUrl ~= "BANNER_URL_HERE" then
-            if (not Menu.bannerTexture or Menu.bannerTexture == 0) and not Menu.bannerLoading then
-                Menu.LoadBannerTexture(Menu.Banner.imageUrl)
-            end
-        end
-    end
-end)
 
 return Menu
