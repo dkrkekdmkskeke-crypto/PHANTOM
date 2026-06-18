@@ -27,7 +27,7 @@ Menu.Items = {}
 
 Menu.Banner = {
     enabled = true,
-    imageUrl = "https://hizliresim.com/t7rdy5t",
+    imageUrl = "https://hizliresim.com/n4kmr3j",
     height = 100
 }
 
