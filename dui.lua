@@ -3,7 +3,7 @@ local Menu = {}
 Menu.Visible = false
 Menu.CurrentItem = 1
 Menu.ItemScrollOffset = 0
-Menu.ItemsPerPage = 9
+Menu.ItemsPerPage = 8
 Menu.SelectorY = 0
 Menu.SmoothFactor = 0.22
 Menu.Scale = 1.0
@@ -19,31 +19,179 @@ Menu.BindingFeatureKey = nil
 Menu.BindingFeatureKeyName = nil
 Menu.SelectedKey = nil
 Menu.SelectedKeyName = nil
-Menu.SectionName = "Main Menu"
+Menu.SectionName = "Menu"
 Menu.Title = "phantom"
-Menu.FooterText = ""
-Menu.FooterBrand = ""
-Menu.HomeLabel = "Home"
-Menu.CategoryLabel = "Main Menu"
+Menu.FooterText = "phantom.lua"
 Menu.BrandAnimStart = nil
 Menu.Items = {}
 
 Menu.Banner = {
     enabled = true,
-    imageUrl = "https://hizliresim.com/4ji67p5",
+    imageUrl = "https://i.hizliresim.com/t7rdy5t.png",
     height = 100
 }
 
+Menu.bannerTexture = nil
+Menu.bannerWidth = 0
+Menu.bannerHeight = 0
+Menu.bannerLoadFailed = false
+Menu.bannerLoading = false
+
+function Menu.IsImageBytes(data)
+    if not data or #data < 4 then return false end
+    local b1, b2, b3, b4 = string.byte(data, 1, 4)
+    if b1 == 0x89 and b2 == 0x50 and b3 == 0x4E and b4 == 0x47 then return true end
+    if b1 == 0xFF and b2 == 0xD8 and b3 == 0xFF then return true end
+    if b1 == 0x42 and b2 == 0x4D then return true end
+    if b1 == 0x47 and b2 == 0x49 and b3 == 0x46 then return true end
+    return false
+end
+
+function Menu.ExtractImageUrlFromHtml(html)
+    if not html or html == "" then return nil end
+    local patterns = {
+        'property=["\']og:image["\'][^>]-content=["\']([^"\']+)["\']',
+        'content=["\']([^"\']+)["\'][^>]-property=["\']og:image["\']',
+        '(https?://i%.hizliresim%.com/[%w%-%._]+)',
+        '(https?://i%.imgur%.com/[%w%-%._]+)',
+        '(https?://cdn%.discordapp%.com/attachments/[^"\']+)',
+        '(https?://media%.discordapp%.net/attachments/[^"\']+)',
+        '(https?://raw%.githubusercontent%.com/[^"\']+%.[pP][nN][gG])',
+        '(https?://raw%.githubusercontent%.com/[^"\']+%.[jJ][pP][eE]?[gG]?)',
+        'src=["\'](https?://[^"\']+%.[pP][nN][gG])["\']',
+        'src=["\'](https?://[^"\']+%.[jJ][pP][eE]?[gG]?)["\']',
+        'src=["\'](https?://[^"\']+%.[wW][eE][bB][pP])["\']'
+    }
+    for _, pattern in ipairs(patterns) do
+        local found = html:match(pattern)
+        if found and found ~= "" then return found end
+    end
+    return nil
+end
+
+function Menu.ResolveBannerCandidates(url)
+    local candidates = {}
+    local function add(u)
+        if u and u ~= "" then
+            for _, existing in ipairs(candidates) do
+                if existing == u then return end
+            end
+            table.insert(candidates, u)
+        end
+    end
+
+    add(url)
+
+    local lower = string.lower(url or "")
+    local hizId = url and url:match("hizliresim%.com/([%w%-_]+)")
+    if hizId then
+        hizId = hizId:gsub("%.png$", ""):gsub("%.jpg$", ""):gsub("%.jpeg$", "")
+        add("https://i.hizliresim.com/" .. hizId .. ".png")
+        add("https://i.hizliresim.com/" .. hizId .. ".jpg")
+    end
+
+    local imgurId = url and url:match("imgur%.com/([%w%d]+)")
+    if imgurId and not lower:find("i%.imgur%.com") then
+        add("https://i.imgur.com/" .. imgurId .. ".png")
+        add("https://i.imgur.com/" .. imgurId .. ".jpg")
+    end
+
+    if not lower:match("%.png") and not lower:match("%.jpe?g") and not lower:match("%.webp") and not lower:match("%.gif") and not lower:match("%.bmp") then
+        add(url .. ".png")
+        add(url .. ".jpg")
+    end
+
+    return candidates
+end
+
+function Menu.TryLoadBannerFromBytes(body)
+    if not body or #body == 0 then return false end
+    if not Menu.IsImageBytes(body) then return false end
+    if not Susano or not Susano.LoadTextureFromBuffer then return false end
+
+    local ok, textureId, width, height = pcall(function()
+        return Susano.LoadTextureFromBuffer(body)
+    end)
+
+    if ok and textureId and textureId ~= 0 then
+        Menu.bannerTexture = textureId
+        Menu.bannerWidth = width or 0
+        Menu.bannerHeight = height or 0
+        Menu.bannerLoadFailed = false
+        return true
+    end
+
+    return false
+end
+
+function Menu.LoadBannerTexture(url)
+    if not url or url == "" then return end
+    if Menu.bannerLoading then return end
+    if not Susano or not Susano.HttpGet then return end
+
+    Menu.bannerLoading = true
+    Menu.bannerLoadFailed = false
+
+    CreateThread(function()
+        local loaded = false
+        local candidates = Menu.ResolveBannerCandidates(url)
+
+        for _, candidate in ipairs(candidates) do
+            if loaded then break end
+
+            local ok, status, body = pcall(function()
+                return Susano.HttpGet(candidate)
+            end)
+
+            if ok and status == 200 and body and #body > 0 then
+                if Menu.TryLoadBannerFromBytes(body) then
+                    loaded = true
+                    break
+                end
+
+                local extracted = Menu.ExtractImageUrlFromHtml(body)
+                if extracted and extracted ~= candidate then
+                    local ok2, status2, body2 = pcall(function()
+                        return Susano.HttpGet(extracted)
+                    end)
+                    if ok2 and status2 == 200 and body2 and Menu.TryLoadBannerFromBytes(body2) then
+                        loaded = true
+                        break
+                    end
+                end
+            end
+        end
+
+        Menu.bannerLoading = false
+        Menu.bannerLoadFailed = not loaded
+    end)
+end
+
+function Menu.SetBannerUrl(url)
+    if not url or url == "" or url == "https://hizliresim.com/t7rdy5t" then return end
+    Menu.Banner.imageUrl = url
+    Menu.bannerTexture = nil
+    Menu.bannerWidth = 0
+    Menu.bannerHeight = 0
+    Menu.LoadBannerTexture(url)
+end
+
+function Menu.ColorToUnit(r, g, b, a)
+    a = a or 255
+    if r > 1 then r = r / 255 end
+    if g > 1 then g = g / 255 end
+    if b > 1 then b = b / 255 end
+    if a > 1 then a = a / 255 end
+    return r, g, b, a
+end
+
 Menu.Colors = {
-    Accent = { r = 235, g = 25, b = 35 },
-    SelectedBg = { r = 105, g = 18, b = 18 },
+    Accent = { r = 255, g = 255, b = 255 },
+    SelectedBg = { r = 255, g = 255, b = 255 },
     TextWhite = { r = 255, g = 255, b = 255 },
     TextBlack = { r = 0, g = 0, b = 0 },
     BackgroundDark = { r = 8, g = 8, b = 8 },
-    RowDark = { r = 12, g = 12, b = 12 },
-    RowTint = { r = 45, g = 10, b = 10 },
-    HeaderBg = { r = 155, g = 25, b = 25 },
-    HeaderDark = { r = 18, g = 8, b = 8 },
+    RowDark = { r = 14, g = 14, b = 14 },
     FooterBlack = { r = 0, g = 0, b = 0 }
 }
 
@@ -53,13 +201,10 @@ Menu.Position = {
     width = 360,
     itemHeight = 34,
     sectionHeight = 26,
-    categoryHeight = 34,
-    bannerSpacing = 6,
-    homeSpacing = 6,
     headerHeight = 100,
     footerHeight = 26,
-    footerSpacing = 6,
-    sectionSpacing = 6,
+    footerSpacing = 5,
+    sectionSpacing = 5,
     footerRadius = 4,
     itemRadius = 0,
     headerRadius = 8
@@ -73,9 +218,6 @@ function Menu.GetScaledPosition()
         width = Menu.Position.width * scale,
         itemHeight = Menu.Position.itemHeight * scale,
         sectionHeight = Menu.Position.sectionHeight * scale,
-        categoryHeight = Menu.Position.categoryHeight * scale,
-        bannerSpacing = Menu.Position.bannerSpacing * scale,
-        homeSpacing = Menu.Position.homeSpacing * scale,
         headerHeight = Menu.Position.headerHeight * scale,
         footerHeight = Menu.Position.footerHeight * scale,
         footerSpacing = Menu.Position.footerSpacing * scale,
@@ -84,34 +226,6 @@ function Menu.GetScaledPosition()
         itemRadius = Menu.Position.itemRadius * scale,
         headerRadius = Menu.Position.headerRadius * scale
     }
-end
-
-function Menu.LoadBannerTexture(url)
-    if not url or url == "" then return end
-    if not Susano or not Susano.HttpGet or not Susano.LoadTextureFromBuffer then return end
-
-    CreateThread(function()
-        pcall(function()
-            local status, body = Susano.HttpGet(url)
-            if status == 200 and body and #body > 0 then
-                local textureId, width, height = Susano.LoadTextureFromBuffer(body)
-                if textureId and textureId ~= 0 then
-                    Menu.bannerTexture = textureId
-                    Menu.bannerWidth = width
-                    Menu.bannerHeight = height
-                end
-            end
-        end)
-    end)
-end
-
-function Menu.ColorToUnit(r, g, b, a)
-    a = a or 255
-    if r > 1 then r = r / 255 end
-    if g > 1 then g = g / 255 end
-    if b > 1 then b = b / 255 end
-    if a > 1 then a = a / 255 end
-    return r, g, b, a
 end
 
 function Menu.DrawRect(x, y, width, height, r, g, b, a, rounding)
@@ -190,7 +304,7 @@ function Menu.FindNextSelectable(startIndex, direction)
 end
 
 function Menu.UpdateSectionName()
-    local section = Menu.CategoryLabel or "Main Menu"
+    local section = "Menu"
     for i = 1, (Menu.CurrentItem or 1) do
         local item = Menu.Items[i]
         if item and item.isHeader and item.name and item.name ~= "" then
@@ -266,7 +380,7 @@ function Menu.DrawLoadingScreen()
     Menu.DrawRect(barX - 1, barY - 1, barW + 2, barH + 2, 0, 0, 0, 255, 4)
     Menu.DrawRect(barX, barY, barW, barH, 25, 25, 25, 220, 3)
     if percent > 0 then
-        Menu.DrawRect(barX, barY, barW * percent, barH, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 255, 3)
+        Menu.DrawRect(barX, barY, barW * percent, barH, 255, 255, 255, 255, 3)
     end
 
     local statusText = string.format("Loading... %d%%", math.floor(Menu.LoadingProgress or 0))
@@ -305,7 +419,7 @@ function Menu.DrawKeySelector()
     local panelY = sh - panelH - 40
 
     Menu.DrawRect(panelX, panelY, panelW, panelH, 0, 0, 0, 230, 8)
-    Menu.DrawRect(panelX, panelY, panelW, 2, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 255, 0)
+    Menu.DrawRect(panelX, panelY, panelW, 2, 255, 255, 255, 255, 0)
 
     local title = "phantom"
     local titleSize = 22
@@ -322,7 +436,7 @@ function Menu.DrawKeySelector()
     local keyBoxX = panelX + (panelW / 2) - (keyBoxW / 2)
     local keyBoxY = panelY + panelH - keyBoxH - 14
     Menu.DrawRect(keyBoxX, keyBoxY, keyBoxW, keyBoxH, 30, 30, 30, 255, 6)
-    Menu.DrawRect(keyBoxX, keyBoxY, keyBoxW, 1, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 180, 0)
+    Menu.DrawRect(keyBoxX, keyBoxY, keyBoxW, 1, 255, 255, 255, 180, 0)
 
     local keySize = 18
     local keyW = Menu.GetTextWidth(keyName, keySize)
@@ -370,7 +484,7 @@ function Menu.DrawFeatureKeySelector()
     local panelY = sh - panelH - 40
 
     Menu.DrawRect(panelX, panelY, panelW, panelH, 0, 0, 0, 230, 8)
-    Menu.DrawRect(panelX, panelY, panelW, 2, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 255, 0)
+    Menu.DrawRect(panelX, panelY, panelW, 2, 255, 255, 255, 255, 0)
 
     local itemName = (Menu.BindingFeatureItem and Menu.BindingFeatureItem.name) or "Feature"
     local title = "Keybind: " .. itemName
@@ -478,16 +592,15 @@ function Menu.DrawHeader()
     local x, y = pos.x, pos.y
     local width = pos.width - 1
     local bannerHeight = Menu.Banner.enabled and (Menu.Banner.height * scale) or pos.headerHeight
+    local hasBannerImage = Menu.Banner.enabled and Menu.bannerTexture and Menu.bannerTexture > 0 and Susano and Susano.DrawImage
 
-    if Menu.Banner.enabled and Menu.bannerTexture and Menu.bannerTexture > 0 and Susano and Susano.DrawImage then
+    if hasBannerImage then
         Susano.DrawImage(Menu.bannerTexture, x, y, width, bannerHeight, 1, 1, 1, 1, pos.headerRadius)
-        Menu.DrawRect(x, y, width, bannerHeight, 0, 0, 0, 140, pos.headerRadius)
     else
         Menu.DrawRect(x, y, width, bannerHeight, 0, 0, 0, 255, pos.headerRadius)
+        local titleSize = 34 * scale
+        Menu.DrawBrandText(x + (width / 2), y + (bannerHeight / 2), titleSize, "")
     end
-
-    local titleSize = 34 * scale
-    Menu.DrawBrandText(x + (width / 2), y + (bannerHeight / 2), titleSize, "")
 end
 
 function Menu.DrawSectionBar()
@@ -495,29 +608,16 @@ function Menu.DrawSectionBar()
     local scale = Menu.Scale or 1.0
     local x = pos.x
     local bannerHeight = Menu.Banner.enabled and (Menu.Banner.height * scale) or pos.headerHeight
-    local y = pos.y + bannerHeight + pos.bannerSpacing
+    local y = pos.y + bannerHeight
     local width = pos.width - 1
     local height = pos.sectionHeight
 
-    Menu.DrawRect(x, y, width, height, Menu.Colors.RowDark.r, Menu.Colors.RowDark.g, Menu.Colors.RowDark.b, 245, 0)
-    Menu.DrawRect(x, y + height - (2 * scale), width, 2 * scale, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 190, 0)
+    Menu.DrawRect(x, y, width, height, Menu.Colors.RowDark.r, Menu.Colors.RowDark.g, Menu.Colors.RowDark.b, 255, 0)
 
-    local text = Menu.HomeLabel or "Home"
-    local textSize = 14
-    local textWidth = Menu.GetTextWidth(text, textSize)
+    local text = Menu.SectionName or "Menu"
+    local textSize = 16
     local textY = y + (height / 2) - ((textSize * scale) / 2) + 1
-    Menu.DrawText(x + (width / 2) - (textWidth / 2), textY, text, textSize, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 255)
-
-    local categoryY = y + height + pos.homeSpacing
-    local categoryHeight = pos.categoryHeight
-    Menu.DrawRect(x, categoryY, width, categoryHeight, Menu.Colors.HeaderDark.r, Menu.Colors.HeaderDark.g, Menu.Colors.HeaderDark.b, 245, 0)
-    Menu.DrawRect(x, categoryY, math.min(width, 118 * scale), categoryHeight, Menu.Colors.HeaderBg.r, Menu.Colors.HeaderBg.g, Menu.Colors.HeaderBg.b, 235, 0)
-    Menu.DrawRect(x, categoryY + categoryHeight - (2 * scale), width, 2 * scale, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 210, 0)
-
-    local categoryText = Menu.CategoryLabel or Menu.SectionName or "Main Menu"
-    local categorySize = 16
-    local categoryTextY = categoryY + (categoryHeight / 2) - ((categorySize * scale) / 2) + 1
-    Menu.DrawText(x + 14 * scale, categoryTextY, categoryText, categorySize, 255, 255, 255, 255)
+    Menu.DrawText(x + 14 * scale, textY, text, textSize, 255, 255, 255, 255)
 end
 
 function Menu.DrawToggle(x, itemY, width, itemHeight, item, isSelected)
@@ -529,15 +629,18 @@ function Menu.DrawToggle(x, itemY, width, itemHeight, item, isSelected)
     local toggleRadius = toggleHeight / 2
 
     if item.value then
-        Menu.DrawRect(toggleX, toggleY, toggleWidth, toggleHeight, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 242, toggleRadius)
+        Menu.DrawRect(toggleX, toggleY, toggleWidth, toggleHeight, 255, 255, 255, 242, toggleRadius)
     else
-        Menu.DrawRect(toggleX, toggleY, toggleWidth, toggleHeight, 45, 18, 18, 242, toggleRadius)
+        Menu.DrawRect(toggleX, toggleY, toggleWidth, toggleHeight, 40, 40, 40, 242, toggleRadius)
     end
 
     local circleSize = toggleHeight - 4
     local circleY = toggleY + 2
     local circleX = item.value and (toggleX + toggleWidth - circleSize - 2) or (toggleX + 2)
-    local knobR, knobG, knobB = 255, 255, 255
+    local knobR, knobG, knobB = item.value and 0 or 255, item.value and 0 or 255, item.value and 0 or 255
+    if isSelected and not item.value then
+        knobR, knobG, knobB = 0, 0, 0
+    end
     Menu.DrawRect(circleX, circleY, circleSize, circleSize, knobR, knobG, knobB, 255, circleSize / 2)
 
     if item.hasSlider then
@@ -550,9 +653,9 @@ function Menu.DrawToggle(x, itemY, width, itemHeight, item, isSelected)
         local currentValue = item.sliderValue or minValue
         local percent = (currentValue - minValue) / math.max(0.0001, (maxValue - minValue))
         percent = math.max(0, math.min(1, percent))
-        local trackR, trackG, trackB = isSelected and 75 or 40, isSelected and 25 or 15, isSelected and 25 or 15
-        local fillR, fillG, fillB = Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b
-        local valR, valG, valB = isSelected and 255 or Menu.Colors.Accent.r, isSelected and 255 or Menu.Colors.Accent.g, isSelected and 255 or Menu.Colors.Accent.b
+        local trackR, trackG, trackB = isSelected and 180 or 40, isSelected and 180 or 40, isSelected and 180 or 40
+        local fillR, fillG, fillB = isSelected and 0 or 255, isSelected and 0 or 255, isSelected and 0 or 255
+        local valR, valG, valB = isSelected and 0 or 255, isSelected and 0 or 255, isSelected and 0 or 255
 
         Menu.DrawRect(sliderX, sliderY, sliderWidth, sliderHeight, trackR, trackG, trackB, 180, 3)
         if percent > 0 then
@@ -580,9 +683,9 @@ function Menu.DrawSlider(x, itemY, width, itemHeight, item, isSelected)
     local currentValue = item.value or minValue
     local percent = (currentValue - minValue) / math.max(0.0001, (maxValue - minValue))
     percent = math.max(0, math.min(1, percent))
-    local trackR, trackG, trackB = isSelected and 75 or 40, isSelected and 25 or 15, isSelected and 25 or 15
-    local fillR, fillG, fillB = Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b
-    local valR, valG, valB = isSelected and 255 or Menu.Colors.Accent.r, isSelected and 255 or Menu.Colors.Accent.g, isSelected and 255 or Menu.Colors.Accent.b
+    local trackR, trackG, trackB = isSelected and 180 or 40, isSelected and 180 or 40, isSelected and 180 or 40
+    local fillR, fillG, fillB = isSelected and 0 or 255, isSelected and 0 or 255, isSelected and 0 or 255
+    local valR, valG, valB = isSelected and 0 or 255, isSelected and 0 or 255, isSelected and 0 or 255
 
     Menu.DrawRect(sliderX, sliderY, sliderWidth, sliderHeight, trackR, trackG, trackB, 180, 3)
     if percent > 0 then
@@ -611,8 +714,7 @@ function Menu.DrawItem(x, itemY, width, itemHeight, item, isSelected)
         return
     end
 
-    Menu.DrawRect(x, itemY, width, itemHeight, Menu.Colors.RowDark.r, Menu.Colors.RowDark.g, Menu.Colors.RowDark.b, 235, 0)
-    Menu.DrawRect(x, itemY, width, itemHeight, Menu.Colors.RowTint.r, Menu.Colors.RowTint.g, Menu.Colors.RowTint.b, 70, 0)
+    Menu.DrawRect(x, itemY, width, itemHeight, Menu.Colors.RowDark.r, Menu.Colors.RowDark.g, Menu.Colors.RowDark.b, 255, 0)
 
     if isSelected then
         if Menu.SelectorY == 0 then Menu.SelectorY = itemY end
@@ -620,10 +722,12 @@ function Menu.DrawItem(x, itemY, width, itemHeight, item, isSelected)
         if math.abs(Menu.SelectorY - itemY) < 0.5 then Menu.SelectorY = itemY end
         Menu.DrawRect(x, Menu.SelectorY, width, itemHeight,
             Menu.Colors.SelectedBg.r, Menu.Colors.SelectedBg.g, Menu.Colors.SelectedBg.b, 255, 0)
-        Menu.DrawRect(x, Menu.SelectorY, 4 * scale, itemHeight, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 255, 0)
     end
 
     local textR, textG, textB = 255, 255, 255
+    if isSelected then
+        textR, textG, textB = 0, 0, 0
+    end
 
     local textX = x + (16 * scale)
     local textY = itemY + (itemHeight / 2) - (8 * scale)
@@ -672,7 +776,7 @@ function Menu.DrawItems()
     local scale = Menu.Scale or 1.0
     local x = pos.x
     local bannerHeight = Menu.Banner.enabled and (Menu.Banner.height * scale) or pos.headerHeight
-    local startY = pos.y + bannerHeight + pos.bannerSpacing + pos.sectionHeight + pos.homeSpacing + pos.categoryHeight + pos.sectionSpacing
+    local startY = pos.y + bannerHeight + pos.sectionHeight + pos.sectionSpacing
     local width = pos.width - 1
     local itemHeight = pos.itemHeight
     local maxVisible = Menu.ItemsPerPage
@@ -709,21 +813,26 @@ function Menu.DrawFooter()
     local scale = Menu.Scale or 1.0
     local x = pos.x
     local bannerHeight = Menu.Banner.enabled and (Menu.Banner.height * scale) or pos.headerHeight
-    local totalHeight = bannerHeight + pos.bannerSpacing + pos.sectionHeight + pos.homeSpacing + pos.categoryHeight + pos.sectionSpacing + Menu.GetContentHeight()
+    local totalHeight = bannerHeight + pos.sectionHeight + pos.sectionSpacing + Menu.GetContentHeight()
     local footerY = pos.y + totalHeight + pos.footerSpacing
     local footerWidth = pos.width - 1
     local footerHeight = pos.footerHeight
 
     Menu.DrawRect(x, footerY, footerWidth, footerHeight, 0, 0, 0, 255, pos.footerRadius)
-    Menu.DrawRect(x, footerY, footerWidth, 2 * scale, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 220, 0)
 
     local footerSize = 13
     local textY = footerY + (footerHeight / 2)
+    local brandText, alpha = Menu.GetBrandAnim()
+    local suffix = (alpha >= 1 and brandText == "phantom") and ".lua" or ""
+    local footerDisplay = brandText .. suffix
+    local alpha255 = math.floor(alpha * 255)
+    Menu.DrawText(x + 15 * scale, textY - ((footerSize * scale) / 2) + 1, footerDisplay, footerSize, 255, 255, 255, alpha255)
+
     local selectable = Menu.GetSelectableItems()
     local currentPos = Menu.FindSelectablePosition(Menu.CurrentItem or 1)
-    local posText = string.format("(%d/%d)", currentPos, math.max(#selectable, 1))
+    local posText = string.format("%d / %d", currentPos, math.max(#selectable, 1))
     local posWidth = Menu.GetTextWidth(posText, footerSize)
-    Menu.DrawText(x + footerWidth - posWidth - (15 * scale), textY - ((footerSize * scale) / 2) + 1, posText, footerSize, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 255)
+    Menu.DrawText(x + footerWidth - posWidth - (15 * scale), textY, posText, footerSize, 255, 255, 255, 255)
 end
 
 function Menu.DrawBackground()
@@ -732,11 +841,9 @@ function Menu.DrawBackground()
     local x, y = pos.x, pos.y
     local width = pos.width - 1
     local bannerHeight = Menu.Banner.enabled and (Menu.Banner.height * scale) or pos.headerHeight
-    local totalHeight = bannerHeight + pos.bannerSpacing + pos.sectionHeight + pos.homeSpacing + pos.categoryHeight + pos.sectionSpacing + Menu.GetContentHeight() + pos.footerSpacing + pos.footerHeight
-    local border = 3 * scale
+    local totalHeight = bannerHeight + pos.sectionHeight + pos.sectionSpacing + Menu.GetContentHeight() + pos.footerSpacing + pos.footerHeight
 
-    Menu.DrawRect(x - border, y - border, width + (border * 2), totalHeight + (border * 2), Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 255, pos.headerRadius)
-    Menu.DrawRect(x, y, width, totalHeight, 0, 0, 0, 235, pos.headerRadius)
+    Menu.DrawRect(x, y, width, totalHeight, 0, 0, 0, 250, pos.headerRadius)
 end
 
 local NotificationQueue = {}
@@ -941,8 +1048,19 @@ CreateThread(function()
     end
 end)
 
-if Menu.Banner.enabled and Menu.Banner.imageUrl and Menu.Banner.imageUrl ~= "" then
+if Menu.Banner.enabled and Menu.Banner.imageUrl and Menu.Banner.imageUrl ~= "" and Menu.Banner.imageUrl ~= "BANNER_URL_HERE" then
     Menu.LoadBannerTexture(Menu.Banner.imageUrl)
 end
+
+CreateThread(function()
+    while true do
+        Wait(5000)
+        if Menu.Banner.enabled and Menu.Banner.imageUrl and Menu.Banner.imageUrl ~= "" and Menu.Banner.imageUrl ~= "BANNER_URL_HERE" then
+            if (not Menu.bannerTexture or Menu.bannerTexture == 0) and not Menu.bannerLoading then
+                Menu.LoadBannerTexture(Menu.Banner.imageUrl)
+            end
+        end
+    end
+end)
 
 return Menu
