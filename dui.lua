@@ -34,10 +34,6 @@ Menu.Banner = {
     height = 100
 }
 
-Menu.bannerTexture = nil
-Menu.bannerWidth = 0
-Menu.bannerHeight = 0
-
 Menu.Colors = {
     Accent = { r = 235, g = 25, b = 35 },
     SelectedBg = { r = 105, g = 18, b = 18 },
