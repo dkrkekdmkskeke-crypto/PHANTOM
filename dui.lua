@@ -17,6 +17,8 @@ Menu.SelectingFeatureBind = false
 Menu.BindingFeatureItem = nil
 Menu.BindingFeatureKey = nil
 Menu.BindingFeatureKeyName = nil
+Menu.BindingFeaturePreviousKey = nil
+Menu.BindingFeaturePreviousKeyName = nil
 Menu.SelectedKey = nil
 Menu.SelectedKeyName = nil
 Menu.SectionName = "Menu"
@@ -492,17 +494,18 @@ function Menu.DrawFeatureKeySelector()
     local titleW = Menu.GetTextWidth(title, titleSize)
     Menu.DrawShadowText(panelX + (panelW / 2) - (titleW / 2), panelY + 12, title, titleSize, 255, 255, 255, 255)
 
-    local hint = "Press a key - ENTER to confirm (F9 to cancel)"
+    local chooseOnEnter = Menu.BindingFeatureItem and Menu.BindingFeatureItem.chooseKeyOnEnter
+    local hint = chooseOnEnter and "Choose Key" or "Press a key - ENTER to confirm (F9 to cancel)"
     local hintSize = 13
     local hintW = Menu.GetTextWidth(hint, hintSize)
     Menu.DrawText(panelX + (panelW / 2) - (hintW / 2), panelY + 42, hint, hintSize, 200, 200, 200, 255)
 
-    local keyName = Menu.BindingFeatureKeyName or "..."
-    local keyBoxW, keyBoxH = 56, 34
+    local keyName = Menu.BindingFeatureKeyName or (chooseOnEnter and "Choose Key" or "...")
+    local keyW = Menu.GetTextWidth(keyName, 18)
+    local keyBoxW, keyBoxH = math.max(56, keyW + 24), 34
     local keyBoxX = panelX + (panelW / 2) - (keyBoxW / 2)
     local keyBoxY = panelY + panelH - keyBoxH - 12
     Menu.DrawRect(keyBoxX, keyBoxY, keyBoxW, keyBoxH, 30, 30, 30, 255, 6)
-    local keyW = Menu.GetTextWidth(keyName, 18)
     Menu.DrawText(keyBoxX + (keyBoxW / 2) - (keyW / 2), keyBoxY + 7, keyName, 18, 255, 255, 255, 255)
 end
 
@@ -510,10 +513,45 @@ function Menu.HandleFeatureKeySelection()
     if not (Susano and Susano.GetAsyncKeyState) then return end
 
     if Menu.IsKeyJustPressed(0x78) then
+        if Menu.BindingFeatureItem and Menu.BindingFeatureItem.chooseKeyOnEnter then
+            Menu.BindingFeatureItem.bindKey = Menu.BindingFeaturePreviousKey
+            Menu.BindingFeatureItem.bindKeyName = Menu.BindingFeaturePreviousKeyName or "None"
+        end
         Menu.SelectingFeatureBind = false
         Menu.BindingFeatureItem = nil
         Menu.BindingFeatureKey = nil
         Menu.BindingFeatureKeyName = nil
+        Menu.BindingFeaturePreviousKey = nil
+        Menu.BindingFeaturePreviousKeyName = nil
+        return
+    end
+
+    local keysToCheck = {
+        0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D,
+        0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A,
+        0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
+        0x20, 0x1B, 0x08, 0x09, 0x10, 0x11, 0x12,
+        0x25, 0x26, 0x27, 0x28,
+        0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x79, 0x7A, 0x7B
+    }
+
+    if Menu.BindingFeatureItem and Menu.BindingFeatureItem.chooseKeyOnEnter then
+        for _, keyCode in ipairs(keysToCheck) do
+            if Menu.IsKeyJustPressed(keyCode) then
+                Menu.BindingFeatureItem.bindKey = keyCode
+                Menu.BindingFeatureItem.bindKeyName = Menu.GetKeyName(keyCode)
+                if Menu.Notify then
+                    Menu.Notify("success", Menu.BindingFeatureItem.name .. " bound to " .. Menu.BindingFeatureItem.bindKeyName)
+                end
+                Menu.SelectingFeatureBind = false
+                Menu.BindingFeatureItem = nil
+                Menu.BindingFeatureKey = nil
+                Menu.BindingFeatureKeyName = nil
+                Menu.BindingFeaturePreviousKey = nil
+                Menu.BindingFeaturePreviousKeyName = nil
+                return
+            end
+        end
         return
     end
 
@@ -529,17 +567,10 @@ function Menu.HandleFeatureKeySelection()
         Menu.BindingFeatureItem = nil
         Menu.BindingFeatureKey = nil
         Menu.BindingFeatureKeyName = nil
+        Menu.BindingFeaturePreviousKey = nil
+        Menu.BindingFeaturePreviousKeyName = nil
         return
     end
-
-    local keysToCheck = {
-        0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D,
-        0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A,
-        0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
-        0x20, 0x1B, 0x08, 0x09, 0x10, 0x11, 0x12,
-        0x25, 0x26, 0x27, 0x28,
-        0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x79, 0x7A, 0x7B
-    }
 
     for _, keyCode in ipairs(keysToCheck) do
         if Menu.IsKeyJustPressed(keyCode) then
@@ -564,7 +595,11 @@ function Menu.HandleFeatureKeybinds()
                     end
                     if item.onClick then item.onClick(item.value) end
                 elseif item.type == "action" then
-                    if item.onClick then item.onClick() end
+                    if item.onBind then
+                        item.onBind()
+                    elseif item.onClick then
+                        item.onClick()
+                    end
                     if Menu.Notify then Menu.Notify("info", item.name .. " activated") end
                 end
             end
@@ -732,7 +767,7 @@ function Menu.DrawItem(x, itemY, width, itemHeight, item, isSelected)
     local textX = x + (16 * scale)
     local textY = itemY + (itemHeight / 2) - (8 * scale)
     local label = item.name or ""
-    if item.bindKeyName then
+    if item.bindKeyName and not item.showBindOnRight then
         label = label .. " [" .. item.bindKeyName .. "]"
     end
     Menu.DrawText(textX, textY, label, 17, textR, textG, textB, 255)
@@ -742,7 +777,7 @@ function Menu.DrawItem(x, itemY, width, itemHeight, item, isSelected)
     elseif item.type == "slider" then
         Menu.DrawSlider(x, itemY, width, itemHeight, item, isSelected)
     elseif item.type == "action" then
-        local hint = ">"
+        local hint = (item.showBindOnRight and item.bindKeyName) or item.rightText or ">"
         local hintWidth = Menu.GetTextWidth(hint, 16)
         Menu.DrawText(x + width - hintWidth - (16 * scale), textY, hint, 16, textR, textG, textB, 180)
     end
@@ -984,6 +1019,16 @@ function Menu.ActivateCurrentItem()
         end
         if item.onClick then item.onClick(item.value) end
     elseif item.type == "action" then
+        if item.chooseKeyOnEnter then
+            Menu.SelectingFeatureBind = true
+            Menu.BindingFeatureItem = item
+            Menu.BindingFeatureKey = item.bindKey
+            Menu.BindingFeatureKeyName = "Choose Key"
+            Menu.BindingFeaturePreviousKey = item.bindKey
+            Menu.BindingFeaturePreviousKeyName = item.bindKeyName
+            item.bindKeyName = "Choose Key"
+            return
+        end
         if item.onClick then item.onClick() end
     end
 end
