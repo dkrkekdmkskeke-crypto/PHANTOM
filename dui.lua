@@ -22,7 +22,7 @@ Menu.SelectedKeyName = nil
 Menu.SectionName = "Main Menu"
 Menu.Title = "phantom"
 Menu.FooterText = ""
-Menu.FooterBrand = "kai"
+Menu.FooterBrand = ""
 Menu.HomeLabel = "Home"
 Menu.CategoryLabel = "Main Menu"
 Menu.BrandAnimStart = nil
@@ -30,7 +30,7 @@ Menu.Items = {}
 
 Menu.Banner = {
     enabled = true,
-    imageUrl = "https://hizliresim.com/t7rdy5t",
+    imageUrl = "https://hizliresim.com/4ji67p5",
     height = 100
 }
 
@@ -58,10 +58,12 @@ Menu.Position = {
     itemHeight = 34,
     sectionHeight = 26,
     categoryHeight = 34,
+    bannerSpacing = 6,
+    homeSpacing = 6,
     headerHeight = 100,
     footerHeight = 26,
-    footerSpacing = 0,
-    sectionSpacing = 0,
+    footerSpacing = 6,
+    sectionSpacing = 6,
     footerRadius = 4,
     itemRadius = 0,
     headerRadius = 8
@@ -76,6 +78,8 @@ function Menu.GetScaledPosition()
         itemHeight = Menu.Position.itemHeight * scale,
         sectionHeight = Menu.Position.sectionHeight * scale,
         categoryHeight = Menu.Position.categoryHeight * scale,
+        bannerSpacing = Menu.Position.bannerSpacing * scale,
+        homeSpacing = Menu.Position.homeSpacing * scale,
         headerHeight = Menu.Position.headerHeight * scale,
         footerHeight = Menu.Position.footerHeight * scale,
         footerSpacing = Menu.Position.footerSpacing * scale,
@@ -495,7 +499,7 @@ function Menu.DrawSectionBar()
     local scale = Menu.Scale or 1.0
     local x = pos.x
     local bannerHeight = Menu.Banner.enabled and (Menu.Banner.height * scale) or pos.headerHeight
-    local y = pos.y + bannerHeight
+    local y = pos.y + bannerHeight + pos.bannerSpacing
     local width = pos.width - 1
     local height = pos.sectionHeight
 
@@ -508,7 +512,7 @@ function Menu.DrawSectionBar()
     local textY = y + (height / 2) - ((textSize * scale) / 2) + 1
     Menu.DrawText(x + (width / 2) - (textWidth / 2), textY, text, textSize, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 255)
 
-    local categoryY = y + height
+    local categoryY = y + height + pos.homeSpacing
     local categoryHeight = pos.categoryHeight
     Menu.DrawRect(x, categoryY, width, categoryHeight, Menu.Colors.HeaderDark.r, Menu.Colors.HeaderDark.g, Menu.Colors.HeaderDark.b, 245, 0)
     Menu.DrawRect(x, categoryY, math.min(width, 118 * scale), categoryHeight, Menu.Colors.HeaderBg.r, Menu.Colors.HeaderBg.g, Menu.Colors.HeaderBg.b, 235, 0)
@@ -672,7 +676,7 @@ function Menu.DrawItems()
     local scale = Menu.Scale or 1.0
     local x = pos.x
     local bannerHeight = Menu.Banner.enabled and (Menu.Banner.height * scale) or pos.headerHeight
-    local startY = pos.y + bannerHeight + pos.sectionHeight + pos.categoryHeight + pos.sectionSpacing
+    local startY = pos.y + bannerHeight + pos.bannerSpacing + pos.sectionHeight + pos.homeSpacing + pos.categoryHeight + pos.sectionSpacing
     local width = pos.width - 1
     local itemHeight = pos.itemHeight
     local maxVisible = Menu.ItemsPerPage
@@ -709,7 +713,7 @@ function Menu.DrawFooter()
     local scale = Menu.Scale or 1.0
     local x = pos.x
     local bannerHeight = Menu.Banner.enabled and (Menu.Banner.height * scale) or pos.headerHeight
-    local totalHeight = bannerHeight + pos.sectionHeight + pos.categoryHeight + pos.sectionSpacing + Menu.GetContentHeight()
+    local totalHeight = bannerHeight + pos.bannerSpacing + pos.sectionHeight + pos.homeSpacing + pos.categoryHeight + pos.sectionSpacing + Menu.GetContentHeight()
     local footerY = pos.y + totalHeight + pos.footerSpacing
     local footerWidth = pos.width - 1
     local footerHeight = pos.footerHeight
@@ -721,7 +725,7 @@ function Menu.DrawFooter()
     local textY = footerY + (footerHeight / 2)
     local selectable = Menu.GetSelectableItems()
     local currentPos = Menu.FindSelectablePosition(Menu.CurrentItem or 1)
-    local posText = string.format("%s (%d/%d)", Menu.FooterBrand or "kai", currentPos, math.max(#selectable, 1))
+    local posText = string.format("(%d/%d)", currentPos, math.max(#selectable, 1))
     local posWidth = Menu.GetTextWidth(posText, footerSize)
     Menu.DrawText(x + footerWidth - posWidth - (15 * scale), textY - ((footerSize * scale) / 2) + 1, posText, footerSize, Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 255)
 end
@@ -732,7 +736,7 @@ function Menu.DrawBackground()
     local x, y = pos.x, pos.y
     local width = pos.width - 1
     local bannerHeight = Menu.Banner.enabled and (Menu.Banner.height * scale) or pos.headerHeight
-    local totalHeight = bannerHeight + pos.sectionHeight + pos.categoryHeight + pos.sectionSpacing + Menu.GetContentHeight() + pos.footerSpacing + pos.footerHeight
+    local totalHeight = bannerHeight + pos.bannerSpacing + pos.sectionHeight + pos.homeSpacing + pos.categoryHeight + pos.sectionSpacing + Menu.GetContentHeight() + pos.footerSpacing + pos.footerHeight
     local border = 3 * scale
 
     Menu.DrawRect(x - border, y - border, width + (border * 2), totalHeight + (border * 2), Menu.Colors.Accent.r, Menu.Colors.Accent.g, Menu.Colors.Accent.b, 255, pos.headerRadius)
