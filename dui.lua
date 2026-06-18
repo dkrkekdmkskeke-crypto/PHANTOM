@@ -26,6 +26,9 @@ Menu.Title = "phantom"
 Menu.FooterText = "phantom.lua"
 Menu.BrandAnimStart = nil
 Menu.Items = {}
+Menu.RootItems = nil
+Menu.CurrentMenuName = "Menu"
+Menu.MenuStack = {}
 
 Menu.Banner = {
     enabled = true,
@@ -306,7 +309,7 @@ function Menu.FindNextSelectable(startIndex, direction)
 end
 
 function Menu.UpdateSectionName()
-    local section = "Menu"
+    local section = Menu.CurrentMenuName or "Menu"
     for i = 1, (Menu.CurrentItem or 1) do
         local item = Menu.Items[i]
         if item and item.isHeader and item.name and item.name ~= "" then
@@ -314,6 +317,44 @@ function Menu.UpdateSectionName()
         end
     end
     Menu.SectionName = section
+end
+
+function Menu.SelectFirstItem()
+    Menu.CurrentItem = 1
+    for i, item in ipairs(Menu.Items or {}) do
+        if Menu.IsSelectableItem(item) then
+            Menu.CurrentItem = i
+            break
+        end
+    end
+    Menu.ItemScrollOffset = 0
+    Menu.SelectorY = 0
+    Menu.UpdateSectionName()
+end
+
+function Menu.OpenSubmenu(item)
+    if not item or not item.items then return end
+    table.insert(Menu.MenuStack, {
+        items = Menu.Items,
+        currentItem = Menu.CurrentItem,
+        scrollOffset = Menu.ItemScrollOffset,
+        menuName = Menu.CurrentMenuName
+    })
+    Menu.Items = item.items
+    Menu.CurrentMenuName = item.name or "Menu"
+    Menu.SelectFirstItem()
+end
+
+function Menu.GoBack()
+    local previous = table.remove(Menu.MenuStack)
+    if not previous then return false end
+    Menu.Items = previous.items or Menu.Items
+    Menu.CurrentItem = previous.currentItem or 1
+    Menu.ItemScrollOffset = previous.scrollOffset or 0
+    Menu.CurrentMenuName = previous.menuName or "Menu"
+    Menu.SelectorY = 0
+    Menu.UpdateSectionName()
+    return true
 end
 
 function Menu.UpdateBrandAnim()
@@ -585,26 +626,34 @@ function Menu.HandleFeatureKeybinds()
     if Menu.IsLoading or Menu.SelectingKey or Menu.SelectingFeatureBind or Menu.Visible then return end
     if not Menu.LoadingComplete then return end
 
-    for _, item in ipairs(Menu.Items or {}) do
-        if item.bindKey and (item.type == "toggle" or item.type == "action") then
-            if Menu.IsKeyJustPressed(item.bindKey) then
-                if item.type == "toggle" then
-                    item.value = not item.value
-                    if Menu.Notify then
-                        Menu.Notify(item.value and "success" or "info", item.name .. ": " .. (item.value and "Enabled" or "Disabled"))
+    local function handleItems(items)
+        for _, item in ipairs(items or {}) do
+            if item.items then
+                handleItems(item.items)
+            end
+
+            if item.bindKey and (item.type == "toggle" or item.type == "action") then
+                if Menu.IsKeyJustPressed(item.bindKey) then
+                    if item.type == "toggle" then
+                        item.value = not item.value
+                        if Menu.Notify then
+                            Menu.Notify(item.value and "success" or "info", item.name .. ": " .. (item.value and "Enabled" or "Disabled"))
+                        end
+                        if item.onClick then item.onClick(item.value) end
+                    elseif item.type == "action" then
+                        if item.onBind then
+                            item.onBind()
+                        elseif item.onClick then
+                            item.onClick()
+                        end
+                        if Menu.Notify then Menu.Notify("info", item.name .. " activated") end
                     end
-                    if item.onClick then item.onClick(item.value) end
-                elseif item.type == "action" then
-                    if item.onBind then
-                        item.onBind()
-                    elseif item.onClick then
-                        item.onClick()
-                    end
-                    if Menu.Notify then Menu.Notify("info", item.name .. " activated") end
                 end
             end
         end
     end
+
+    handleItems(Menu.RootItems or Menu.Items)
 end
 
 function Menu.DrawBrandText(centerX, centerY, size_px, suffix)
@@ -776,7 +825,7 @@ function Menu.DrawItem(x, itemY, width, itemHeight, item, isSelected)
         Menu.DrawToggle(x, itemY, width, itemHeight, item, isSelected)
     elseif item.type == "slider" then
         Menu.DrawSlider(x, itemY, width, itemHeight, item, isSelected)
-    elseif item.type == "action" then
+    elseif item.type == "action" or item.type == "submenu" then
         local hint = (item.showBindOnRight and item.bindKeyName) or item.rightText or ">"
         local hintWidth = Menu.GetTextWidth(hint, 16)
         Menu.DrawText(x + width - hintWidth - (16 * scale), textY, hint, 16, textR, textG, textB, 180)
@@ -1018,6 +1067,8 @@ function Menu.ActivateCurrentItem()
             Menu.Notify(item.value and "success" or "info", item.name .. ": " .. (item.value and "Enabled" or "Disabled"))
         end
         if item.onClick then item.onClick(item.value) end
+    elseif item.type == "submenu" then
+        Menu.OpenSubmenu(item)
     elseif item.type == "action" then
         if item.chooseKeyOnEnter then
             Menu.SelectingFeatureBind = true
@@ -1066,6 +1117,8 @@ function Menu.HandleInput()
     elseif Menu.IsKeyJustPressed(0x28) then
         Menu.CurrentItem = Menu.FindNextSelectable(Menu.CurrentItem, 1)
         Menu.UpdateSectionName()
+    elseif Menu.IsKeyJustPressed(0x08) or Menu.IsKeyJustPressed(0x1B) then
+        Menu.GoBack()
     elseif Menu.IsKeyJustPressed(0x25) then
         local item = Menu.Items[Menu.CurrentItem]
         if item then Menu.HandleSliderChange(item, -1) end
